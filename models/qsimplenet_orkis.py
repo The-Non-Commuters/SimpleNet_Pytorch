@@ -10,6 +10,7 @@ from torch.autograd import Variable
 import torch.nn.functional as F
 
 from orkis.qnn import QConv2d, QLinear, QBatchNorm2d, QMaxPool2d, QDropout, QDropout2d, QuaternionToReal
+from orkis.qnn.ops import qmax_pool2d
 
 class qsimplenet_orkis(nn.Module):
     def __init__(self, classes=10, multiply_filters=True, simpnet_name="qsimplenet_orkis"):
@@ -20,7 +21,6 @@ class qsimplenet_orkis(nn.Module):
             QLinear(256*self.multiplier, classes*4),
             QuaternionToReal()
         )
-        self.pool = lambda x, **kw: QMaxPool2d(**kw)(x)
         self.drp = QDropout(0.1)
 
     def load_my_state_dict(self, state_dict):
@@ -52,7 +52,7 @@ class qsimplenet_orkis(nn.Module):
     def forward(self, x):
         out = self.features(x)
         # Global Max Pooling
-        out = self.pool(out, kernel_size=out.size()[2:])
+        out = qmax_pool2d(out, kernel_size=out.size()[2:])
 
         out = self.drp(out)
 
