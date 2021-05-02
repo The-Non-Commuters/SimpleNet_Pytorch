@@ -5,3 +5,5 @@ architecture:
 
 
 from .simplenet import simplenet
+from .qsimplenet_htorch import qsimplenet_htorch
+from .qsimplenet_orkis import qsimplenet_orkis

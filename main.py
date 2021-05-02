@@ -4,14 +4,25 @@ from __future__ import division
 
 import os, sys, pdb, shutil, time, random, datetime
 import argparse
+import numpy as np
 import torch
 import torch.optim.lr_scheduler as lr_scheduler
 import torch.backends.cudnn as cudnn
 import torchvision.datasets as dset
 import torchvision.transforms as transforms
+from torch.utils.data.sampler import SubsetRandomSampler
+
 from utils import AverageMeter, RecorderMeter, time_string, convert_secs2time
 import models
+from datasets import Cifar10
 from tensorboardX import SummaryWriter
+
+from orkis.utils import convert_data_for_quaternion
+import albumentations as A
+from albumentations.pytorch import ToTensorV2
+
+if not torch.cuda.is_available():
+    sys.exit("CUDA is unavailable")
 
 model_names = sorted(
     name
@@ -147,78 +158,114 @@ def main():
         os.makedirs(args.data_path)
 
     if args.dataset == "cifar10":
-        mean = [x / 255 for x in [125.3, 123.0, 113.9]]
-        std = [x / 255 for x in [63.0, 62.1, 66.7]]
+        # mean = [x / 255 for x in [125.3, 123.0, 113.9]]
+        # std = [x / 255 for x in [63.0, 62.1, 66.7]]
+
+        mean = (0.49139968, 0.48215841, 0.44653091)
+        std = (0.24703223, 0.24348513, 0.26158784)
+
     elif args.dataset == "cifar100":
         mean = [x / 255 for x in [129.3, 124.1, 112.4]]
         std = [x / 255 for x in [68.2, 65.4, 70.4]]
     else:
-        assert False, "Unknow dataset : {}".format(args.dataset)
+        assert False, "Unknown dataset : {}".format(args.dataset)
 
     writer = SummaryWriter()
 
-    #   # Data transforms
-    # mean = [0.5071, 0.4867, 0.4408]
-    # std = [0.2675, 0.2565, 0.2761]
+    # transforms
+    transformNone = A.Compose([A.HorizontalFlip(),
+                               A.ShiftScaleRotate(shift_limit=0.05, scale_limit=0.05, rotate_limit=15),
+                               A.Normalize(mean=mean, std=std),
+                               ToTensorV2(),])
 
-    train_transform = transforms.Compose(
-        [
-            transforms.RandomCrop(32, padding=4),
-            transforms.RandomHorizontalFlip(),
-            transforms.ToTensor(),
-            transforms.Normalize(mean, std),
-        ]
-    )
-    # [transforms.CenterCrop(32), transforms.ToTensor(),
-    # transforms.Normalize(mean, std)])
+    transformGray = A.Compose([A.ToGray(p=1),
+                               A.Normalize(mean=mean, std=std),
+                               ToTensorV2(),])
+
+    transformRGBShift = A.Compose([A.RGBShift(r_shift_limit=0,
+                                              g_shift_limit=0,
+                                              b_shift_limit=255,
+                                              always_apply=True),
+                                   A.Normalize(mean=mean, std=std),
+                                   ToTensorV2(),])
+
+    # train_transform = transforms.Compose(
+    #     [
+    #         transforms.RandomCrop(32, padding=4),
+    #         transforms.RandomHorizontalFlip(),
+    #         transforms.ToTensor(),
+    #         transforms.Normalize(mean, std),
+    #         quat_trans,
+    #     ]
     # )
-    test_transform = transforms.Compose(
-        [
-            transforms.CenterCrop(32),
-            transforms.ToTensor(),
-            transforms.Normalize(mean, std),
-        ]
-    )
+
+    # test_transform = transforms.Compose(
+    #     [
+    #         transforms.CenterCrop(32),
+    #         transforms.ToTensor(),
+    #         transforms.Normalize(mean, std),
+    #         quat_trans,
+    #     ]
+    # )
 
     if args.dataset == "cifar10":
-        train_data = dset.CIFAR10(
-            args.data_path, train=True, transform=train_transform, download=True
+        train_set = dset.CIFAR10(
+            args.data_path, train=True, download=True
         )
-        test_data = dset.CIFAR10(
-            args.data_path, train=False, transform=test_transform, download=True
-        )
+        # test_set = dset.CIFAR10(
+        #     args.data_path, train=False, transform=test_transform, download=True
+        # )
         num_classes = 10
     elif args.dataset == "cifar100":
-        train_data = dset.CIFAR100(
-            args.data_path, train=True, transform=train_transform, download=True
+        train_set = dset.CIFAR100(
+            args.data_path, train=True, download=True
         )
-        test_data = dset.CIFAR100(
-            args.data_path, train=False, transform=test_transform, download=True
-        )
+        # test_set = dset.CIFAR100(
+        #     args.data_path, train=False, transform=test_transform, download=True
+        # )
         num_classes = 100
     elif args.dataset == "imagenet":
         assert False, "Did not finish imagenet code"
     else:
         assert False, "Does not support dataset : {}".format(args.dataset)
 
+    # split off 10% of the training set into a validation set
+    np.random.seed(42)
+    train_len = len(train_set)
+    shuffled_idx = np.random.permutation(train_len)
+    train_idx = shuffled_idx[:int(0.9 * train_len)]
+    val_idx = shuffled_idx[int(0.9 * train_len):]
+    train_sampler = SubsetRandomSampler(train_idx)
+    val_sampler = SubsetRandomSampler(val_idx)
+
+    if args.dataset == "cifar10":
+        train_set = Cifar10(data=train_set, transform=transformNone, seed=42)
+    else:
+        raise ValueError("Only CIFAR10 with albumentations is currently supported")
+
     train_loader = torch.utils.data.DataLoader(
-        train_data,
-        batch_size=args.batch_size,
-        shuffle=True,
-        num_workers=args.workers,
-        pin_memory=True,
-    )
-    test_loader = torch.utils.data.DataLoader(
-        test_data,
+        train_set,
         batch_size=args.batch_size,
         shuffle=False,
         num_workers=args.workers,
         pin_memory=True,
+        sampler=train_sampler,
+        collate_fn=convert_data_for_quaternion if args.arch.startswith("q") else None
+    )
+    val_loader = torch.utils.data.DataLoader(
+        train_set,
+        batch_size=args.batch_size,
+        shuffle=False,
+        num_workers=args.workers,
+        pin_memory=True,
+        sampler=val_sampler,
+        collate_fn=convert_data_for_quaternion if args.arch.startswith("q") else None
     )
 
     print_log("=> creating model '{}'".format(args.arch), log)
     # Init model, criterion, and optimizer
     net = models.__dict__[args.arch](num_classes)
+    #convert_model_inplace(net)
     # torch.save(net, 'net.pth')
     # init_net = torch.load('net.pth')
     # net.load_my_state_dict(init_net.state_dict())
@@ -274,7 +321,7 @@ def main():
         print_log("=> did not use any checkpoint for {} model".format(args.arch), log)
 
     if args.evaluate:
-        validate(test_loader, net, criterion, log)
+        validate(val_loader, net, criterion, log)
         return
 
     # Main loop
@@ -313,8 +360,7 @@ def main():
         # adjust_learning_rate(optimizer, epoch)
 
         # evaluate on validation set
-        # val_acc,   val_los   = extract_features(test_loader, net, criterion, log)
-        val_acc, val_los = validate(test_loader, net, criterion, log)
+        val_acc, val_los = validate(val_loader, net, criterion, log)
         is_best = recorder.update(epoch, train_los, train_acc, val_los, val_acc)
 
         if epoch == 180:
