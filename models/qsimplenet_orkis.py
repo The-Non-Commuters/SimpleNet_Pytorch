@@ -12,9 +12,9 @@ import torch.nn.functional as F
 from orkis.qnn import QConv2d, QLinear, QBatchNorm2d, QMaxPool2d, QDropout, QDropout2d, QuaternionToReal
 
 class qsimplenet_orkis(nn.Module):
-    def __init__(self, classes=10, simpnet_name="qsimplenet_orkis"):
+    def __init__(self, classes=10, multiply_filters=True, simpnet_name="qsimplenet_orkis"):
         super().__init__()
-        self.multiplier = 1 # 4
+        self.multiplier = 4 if multiply_filters else 1
         self.features = self._make_layers()
         self.classifier = nn.Sequential(
             QLinear(256*self.multiplier, classes*4),
