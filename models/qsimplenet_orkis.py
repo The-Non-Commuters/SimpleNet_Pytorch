@@ -15,10 +15,10 @@ from orkis.qnn.ops import qmax_pool2d
 from utils import accuracy
 
 class qsimplenet_orkis(pl.LightningModule):
-    def __init__(self, classes=10, multiply_filters=True, simpnet_name="qsimplenet_orkis"):
+    def __init__(self, classes=10, multiply_filters=True, qbn_mode="variance", simpnet_name="qsimplenet_orkis"):
         super().__init__()
         self.multiplier = 4 if multiply_filters else 1
-        self.qbn_mode = "variance"
+        self.qbn_mode = qbn_mode
         self.features_up, self.features_down = self._make_layers()
         self.classifier = nn.Sequential(
             nn.Flatten(),
