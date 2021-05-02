@@ -35,7 +35,7 @@ class qsimplenet_orkis(nn.Module):
             if name not in own_state:
                 # print(name)
                 continue
-            if isinstance(param, Parameter):
+            if isinstance(param, nn.Parameter):
                 # backwards compatibility for serialized parameters
                 param = param.data
             print("STATE_DICT: {}".format(name))
