@@ -133,3 +133,17 @@ def time_file_str():
     ISOTIMEFORMAT = "%Y-%m-%d"
     string = "{}".format(time.strftime(ISOTIMEFORMAT, time.gmtime(time.time())))
     return string + "-{}".format(random.randint(1, 10000))
+
+
+def accuracy(output, target, topk=(1,)):
+    """Computes the precision@k for the specified values of k"""
+    maxk = max(topk)
+    batch_size = target.size(0)
+    _, pred = output.topk(maxk, 1, True, True)
+    pred = pred.t()
+    correct = pred.eq(target.view(1, -1).expand_as(pred))
+    res = []
+    for k in topk:
+        correct_k = correct[:k].float().sum()
+        res.append(correct_k.mul_(100.0 / batch_size))
+    return res
